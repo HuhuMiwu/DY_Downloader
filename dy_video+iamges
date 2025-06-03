@@ -1,0 +1,84 @@
+import re
+import requests
+from DrissionPage import ChromiumPage
+import os
+
+# 公共函数：获取有效链接和目标 ID
+def get_valid_link_and_id(share_url):
+    pattern = re.compile(r'https://v.douyin.com/[^/]+/')
+    match = pattern.search(share_url)
+    if not match:
+        return None, None
+    match_url = match.group(0)
+    response = requests.get(match_url, timeout=10)
+    redirected_url = response.url
+    video_id = re.search(r'/video/(\d+)', redirected_url)
+    note_id = re.search(r'/note/(\d+)', redirected_url)
+    if video_id:
+        return match_url, video_id.group(1), 'video'
+    elif note_id:
+        return match_url, note_id.group(1), 'image'
+    else:
+        return None, None, None
+
+# 视频下载函数
+def download_video(dp, video_path, match_url, target_id):
+    dp.listen.start('/v1/web/aweme/detail/')
+    dp.get(url=match_url)
+    r = dp.listen.wait()
+    json_data = r.response.body
+    video_url = json_data['aweme_detail']['video']['play_addr']['url_list'][-1]
+    with open(os.path.join(video_path, f"{target_id}_video.mp4"), 'wb') as f:
+        print(f'开始下载视频：{video_url}')
+        f.write(requests.get(video_url).content)
+        print(f'视频下载完成')
+
+# 图片下载函数
+def download_images(dp, image_path, match_url, target_id):
+    dp.listen.start('v1/web/aweme/post/')
+    dp.get(url=match_url)
+    r = dp.listen.wait()
+    json_data = r.response.body
+    try:
+        for item in json_data['aweme_list']:
+            if item['aweme_id'] == target_id:
+                item_data = item['images']
+                for idx, image in enumerate(item_data, start=1):
+                    image_url = image['url_list'][-1]
+                    if 'p3-pc-sign.douyinpic.com' not in image_url:
+                        break
+                    with open(os.path.join(image_path, f"{target_id}_image_{idx}.jpg"), 'wb') as f:
+                        try:
+                            print(f'正在下载第{idx}张图片', image_url)
+                            f.write(requests.get(image_url).content)
+                            # print(f'第{idx}张图片下载完成')
+                        except Exception as e:
+                            print(f'下载第{idx}张图片时出错: {e}')
+        print('所有图片下载完成')
+    except Exception as e:
+        print(f'处理数据时出错: {e}')
+
+def main():
+    video_path = r'C:\Users\Administrator\Desktop\pycharm\抖音mv下载'
+    image_path = r'C:\Users\Administrator\Desktop\pycharm\抖音精品图片下载'
+    dp = ChromiumPage()
+
+    while True:
+        share_url = input('请输入抖音分享链接（输入\'q\'退出程序）：')
+        if share_url.lower() == 'q':
+            break
+
+        match_url, target_id, link_type = get_valid_link_and_id(share_url)
+        if not match_url or not target_id:
+            print('无效链接，请重新输入')
+            continue
+
+        if link_type == 'video':
+            download_video(dp, video_path, match_url, target_id)
+        elif link_type == 'image':
+            download_images(dp, image_path, match_url, target_id)
+        else:
+            print('不支持的链接类型，请重新输入')
+
+if __name__ == "__main__":
+    main()
